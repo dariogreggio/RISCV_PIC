@@ -28,11 +28,6 @@
 #pragma intrinsic( _enable, _disable )
 
 
-//#define RISCV_64 1
-//#define RISCV_32M 1
-//#define RISCV_64M 1
-//#define RISCV_16 1
-
 
 BYTE fExit=0;
 BYTE debug=0;
@@ -133,6 +128,25 @@ struct __attribute__((__packed__)) RISCV_IMMEDIATE {
     };
   };
   
+#ifdef RISCV_64
+union __attribute__((__packed__)) REGISTER {
+  uint64_t d;
+  struct __attribute__((__packed__)) { 
+    DWORD l;
+    DWORD h;
+    } d32;
+  struct __attribute__((__packed__)) { 
+    WORD l;
+    WORD h;
+    } x;
+  struct __attribute__((__packed__)) { 
+    BYTE l;
+    BYTE h;
+    BYTE m;
+    BYTE u;
+    } b;
+  };
+#else
 union __attribute__((__packed__)) REGISTER {
   DWORD d;
   struct __attribute__((__packed__)) { 
@@ -146,6 +160,7 @@ union __attribute__((__packed__)) REGISTER {
     BYTE u;
     } b;
   };
+#endif
 #define ID_MODE 0x0000001F
 #define ID_THUMB 0x00000020
 #define ID_FIRQ 0x00000040
@@ -157,71 +172,16 @@ union __attribute__((__packed__)) REGISTER {
 #define ID_JAZELLE 0x01000000
 #define ID_THUMBL 0x06000000
 #define ID_CUMULATIVE 0x08000000
-#define ID_OVERFLOW 0x10000000
-#define ID_CARRY 0x20000000
-#define ID_ZERO 0x40000000
-#define ID_NEGATIVE 0x80000000
-#ifdef ARM_V4
-union __attribute__((__packed__)) REGISTRO_CSR {   // 
-  DWORD d;
-  struct __attribute__((__packed__)) {
-    unsigned int Mode: 5;     // enum CPU_MODES 
-    unsigned int Thumb: 1;
-    unsigned int FIRQ: 1;
-    unsigned int IRQ: 1;
-    unsigned int AsyncAbort: 1;
-    unsigned int Endianness: 1;
-    unsigned int Thumb_IfThenH: 6;
-    unsigned int GE: 4;
-    unsigned int unused: 4;
-    unsigned int Jazelle: 1;
-    unsigned int Thumb_IfThenL: 2;
-    unsigned int Cumulative: 1;
-    unsigned int Overflow: 1;
-    unsigned int Carry: 1;
-    unsigned int Zero: 1;
-    unsigned int Negative: 1;
-    };
-  };
-union REGISTRO_CSR _csr,_csr2;
-#define _csr_mode _csr.Mode
-#else
 union __attribute__((__packed__)) REGISTRO_CSR {   // 
   BYTE b;
   struct __attribute__((__packed__)) {
     unsigned int dummy: 2;     // enum CPU_MODES; il vero Mode è in r15<0..1>
     unsigned int FIRQ: 1;
     unsigned int IRQ: 1;
-    unsigned int Overflow: 1;
-    unsigned int Carry: 1;
-    unsigned int Zero: 1;
-    unsigned int Negative: 1;
     };
   };
-union __attribute__((__packed__)) REGISTER31 {
-  DWORD d;
-  struct __attribute__((__packed__)) { 
-    WORD l;
-    WORD h;
-    } x;
-  struct __attribute__((__packed__)) { 
-    union __attribute__((__packed__)) {
-      BYTE l;
-      unsigned int Mode :2; 
-      };
-    BYTE h;
-    BYTE m;
-    union __attribute__((__packed__)) {
-      BYTE u;
-      union __attribute__((__packed__)) REGISTRO_CSR s; 
-      };
-    } b;
-  };
-#define _csr ((union REGISTER31 *)&regs[31])->b.s
 union REGISTRO_CSR _csr2;
 // In the original mode, the Status Register and Program Counter were combined in a single register, as follows: https://heyrick.eu/armwiki/The_Status_register
-#define _csr_mode ((union REGISTER31 *)&regs[31])->b.Mode
-#endif
 #ifdef ARM_V4
 union REGISTRO_CSR _spsr[5];   // gestire buchi in Modes!
 #else
@@ -232,8 +192,8 @@ BYTE ram_seg[RAM_SIZE];
 
 #define _pc regs[31].d
 #define _sp regs[13].d
-#define _lr regs[14].d
-#define _ip regs[12].d
+#define _lr regs[1].d   // "di solito", dice - opp 5
+#define _x0 regs[0].d   // il "registro x0" è dummy!!
   
 BYTE rom_seg[ROM_SIZE];			
 BYTE Keyboard[8]={255,255,255,255,255,255,255,255};
@@ -265,6 +225,25 @@ enum CPU_MODES {
   MODE_SVC=3
 #endif  
   };
+#ifdef RISCV_64
+union __attribute__((__packed__)) RESULT {
+  struct __attribute__((__packed__)) {
+    BYTE l;
+    BYTE h;
+    BYTE m;
+    BYTE u;
+    } b;
+  struct __attribute__((__packed__)) { 
+    WORD l;
+    WORD h;
+    } x;
+  struct __attribute__((__packed__)) { 
+    WORD l;
+    WORD h;
+    } d32;
+  uint64_t d;
+  };
+#else
 union __attribute__((__packed__)) RESULT {
   struct __attribute__((__packed__)) {
     BYTE l;
@@ -278,6 +257,7 @@ union __attribute__((__packed__)) RESULT {
     } x;
   DWORD d;
   };
+#endif
 
 BYTE GetValue(DWORD t) {
 	register BYTE i;
@@ -290,7 +270,6 @@ BYTE GetValue(DWORD t) {
 	return i;
 	}
 
-#ifdef ARM_V4
 WORD GetValue16(DWORD t) {
 	register WORD i;
 
@@ -302,7 +281,6 @@ WORD GetValue16(DWORD t) {
 
 	return i;
 	}
-#endif
 
 DWORD GetValue32(DWORD t) {
 	register union __attribute__((__packed__)) RESULT i;
@@ -321,6 +299,15 @@ DWORD GetValue32(DWORD t) {
 	return i.d;
 	}
 
+#ifdef RISCV_64 
+uint64_t GetPipe(uint64_t t) {
+
+	if(t < ROM_SIZE) {			// 
+	  Pipe.d=*(uint64_t *)&rom_seg[t & 0xfffffffc];
+		}
+	return Pipe.d;
+	}
+#else
 DWORD GetPipe(DWORD t) {
 
 	if(t < ROM_SIZE) {			// 
@@ -328,6 +315,7 @@ DWORD GetPipe(DWORD t) {
 		}
 	return Pipe.d;
 	}
+#endif
 
 void PutValue(DWORD t,BYTE t1) {
 
@@ -339,7 +327,6 @@ void PutValue(DWORD t,BYTE t1) {
     }
   }
 
-#ifdef ARM_V4
 void PutValue16(DWORD t,WORD t1) {
 
 // printf("rom_seg: %04x, p: %04x\n",rom_seg,p);
@@ -351,7 +338,6 @@ void PutValue16(DWORD t,WORD t1) {
     ram_seg[t]=HIBYTE(t1);
     }
   }
-#endif
 
 void PutValue32(DWORD t,DWORD t1) {
 
@@ -372,9 +358,9 @@ void PutValue32(DWORD t,DWORD t1) {
 
 int Emulate(int mode) {
 #ifdef RISCV_16
-  union __attribute__((__packed__)) REGISTER regs[16];    // ma r15 è usato come REGISTER15!
+  union __attribute__((__packed__)) REGISTER regs[16];    // ma r15 è usato come PC
 #else
-  union __attribute__((__packed__)) REGISTER regs[32];    // ma r31 è usato come REGISTER31!
+  union __attribute__((__packed__)) REGISTER regs[32];    // ma r31 è usato come PC
 #endif
   union __attribute__((__packed__)) REGISTER regs_FIQ[8],regs_IRQ[8],regs_Svc[8],regs_Abort[8],regs_Undef[8]; // alcuni sono di meno ma ok
     
@@ -416,187 +402,132 @@ int Emulate(int mode) {
 		if(DoReset) {
       _sp=0;
  			_pc=0x00000000;
-      _csr_mode=MODE_SVC;    //  credo parta così... e i registri??
       DoIRQ=DoFIQ=DoSWI=0;
 			DoReset=0;
-			}
-    if(DoSWI) {
-			DoSWI=0;
-      for(i=13; i<15; i++)
-        regs_Svc[i-8]=regs[i];
-      _spsr[2]=_csr;     // forse
-      _csr_mode=MODE_SVC;
-      _csr.FIRQ=_csr.IRQ=1;
-      _lr=_pc;
-			_pc=0x00000008;   // a 4 c'è Undef'd, a C prefetch, a 10 DataAbort 
-//	    LED1 ^= 1;      // test NMI, /2020
-  		}
-		if(DoFIQ) {     // https://www.embedded.com/wp-content/uploads/media-1042868-0806esdlynx01.gif
-      if(!_csr.FIRQ) {   // finire! 
-        for(i=8; i<15; i++)
-          regs_FIQ[i-8]=regs[i];
-        _spsr[0]=_csr;     // forse
-        _csr_mode=MODE_FIQ;
-        _csr.FIRQ=1;   // forse..
-        _lr=_pc;
-  			_pc=0x0000001C;
-        }
-			}
-		if(DoIRQ) {     // 
-      if(!_csr.IRQ) {
-        for(i=13; i<15; i++)
-          regs_IRQ[i-8]=regs[i];
-        _spsr[1]=_csr;     // forse
-        _csr_mode=MODE_IRQ;
-        _csr.IRQ=1;   // forse..
-        _lr=_pc;
-  			_pc=0x00000018;
-        }
 			}
 
 
 //printf("Pipe: %08x, Pipe2w: %04x, Pipe2b1: %02x,%02x\n",Pipe,Pipe2.word,Pipe2.bytes.byte1,Pipe2.bytes.byte2);
-    // ~250-400nS @200MHz secondo Simulatore PIC32, 17/1/2020
-	    LED2 ^= 1;      // test ~700nS, 18/1/2020
-    // ~1.2-1.5uS @200MHz secondo Simulatore dsPIC33, 20/1/2020 (ottimizzazioni=0 causa bug BFEXT)
+    // ~250-400nS @200MHz secondo Simulatore PIC32, 
+	    LED2 ^= 1;      // test ~700nS, 
+    // ~1.2-1.5uS @200MHz secondo Simulatore dsPIC33, (ottimizzazioni=0 causa bug BFEXT)
 
+#ifdef RISCV_64 
 		GetPipe(_pc);   // dice che il PC "vale" sempre 4 o 8 oltre l'istruzione attuale... per la pipeline
-    _pc+=4;    // +4 o +8 o boh??
-//    if(!_csr.Thumb) {   // fare...
-//      }
+    _pc+=8;
+#else
+		GetPipe(_pc);   // dice che il PC "vale" sempre 4 o 8 oltre l'istruzione attuale... per la pipeline
+    _pc+=4;
+#endif
 
       switch(Pipe.opcode.typeA.opcode) {
 // The standard NOP is ADDI x0, x0, 0. 
         case 0b0110111:         // LUI load immediate
-          if(Pipe.opcode.type0.optype & 1) {
-            i=Pipe.opcode.type3.shiftAmount;
-            switch(Pipe.opcode.type3.shift) {
-              case 0b00:
-                while(i--) {
-                  _csr2.Carry=res2.d & 0x80000000 ? 1 : 0;
-                  res2.d <<= 1;
-                  }
-                break;
-              case 0b01:
-                while(i--) {
-                  _csr2.Carry=res2.d & 1;
-                  res2.d >>= 1;
-                  }
-                break;
-              case 0b10:
-                while(i--) {
-                  _csr2.Carry=res2.d & 1;
-                  res2.d = ((signed long)res2.d) >> 1;
-                  }
-                break;
-              case 0b11:
-                if(!i) {    // VERIFICARE caso 0 e altro
-                  _csr2.Carry=_csr.Carry;   // il carry vero o solo se S ??
-                  j=res2.d & 1;
-                  res2.d >>= 1;
-                  res2.d |= _csr2.Carry ? 0x80000000 : 0;
-                  _csr.Carry=j;
-                  }
-                else {
-                  _csr2.Carry=_csr.Carry;   // il carry vero o solo se S ??
-                  while(i--) {
-                    j=res2.d & 1;
-                    res2.d >>= 1;
-                    res2.d |= _csr2.Carry ? 0x80000000 : 0;
-                    _csr2.Carry=j;
-                    }
-                  }
-                break;
-              }
-            }
-          else {
-            res2.d=Pipe.opcode.type2.imm;
-            }
-          
-          if(Pipe.opcode.type2.P) {
-            if(Pipe.opcode.type2.UpDown)
-              n= regs[Pipe.opcode.type2.Rn].d + res2.d;
-            else
-              n= regs[Pipe.opcode.type2.Rn].d - res2.d;
-            }
-          if(!Pipe.opcode.type2.P) {
-            if(Pipe.opcode.type2.UpDown)
-              n= regs[Pipe.opcode.type2.Rn].d + res2.d;
-            else
-              n= regs[Pipe.opcode.type2.Rn].d - res2.d;
-            }
-          if(Pipe.opcode.type2.L) {
-            if(Pipe.opcode.type2.B)
-              res3.d=GetValue(n);
-            else
-              res3.d=GetValue32(n);
-            regs[Pipe.opcode.type0.Rd].d=res3.d;
-            }
-          else {
-            if(Pipe.opcode.type2.B)
-              PutValue(n,regs[Pipe.opcode.type0.Rd].b.l);
-            else
-              PutValue32(n,regs[Pipe.opcode.type0.Rd].d);
-            res3.d=regs[Pipe.opcode.type0.Rd].d;
-            }
-          if(Pipe.opcode.type2.W)
-            regs[Pipe.opcode.type2.Rn].d = n;
+          res3.d=Pipe.opcode.typeA.imm << 12;
+          regs[Pipe.opcode.typeI.rd].d=res3.d;
           break;
           
-        case 0b0110111:         // AUIPC
+        case 0b0010111:         // AUIPC
+          res3.d=_pc+(Pipe.opcode.typeA.imm << 12);
+          regs[Pipe.opcode.typeI.rd].d=res3.d;
           break;
           
-        case 0b1101111:         // JAL Branch
+        case 0b1101111:         // JAL Branch and link
+          res3.d=((Pipe.opcode.typeJ.imm1 << 1) | 
+                  (Pipe.opcode.typeJ.imm2 << 11) | 
+                  (Pipe.opcode.typeJ.imm3 << 12) | 
+                  (Pipe.opcode.typeJ.imm4 << 20));
+          regs[Pipe.opcode.typeI.rd].d=_pc;
+          _pc += (signed int)res3.d;
+          break;
+          
         case 0b1100111:         // JALR
-          if(Pipe.opcode.type5.L) {
-            _lr=_pc;    // -4 o -8 o boh??
-            }
-          _pc += 4/* PER ORA COSI' ! */;    
-          _pc += ((signed long)Pipe.opcode.type5.address) << 2;
-//          _pc &= 0x03ffffff;    // 26 bit IL SIGN EXTEND non fa come dovrebbe... evidentemente :) Quindi imposto address come signed-int (anche se mi pare non sia standard in bitfield...)
+          res3.d=regs[Pipe.opcode.typeI.rs1].d+(signed int)Pipe.opcode.typeI.imm;
+          res3.d &= 0xfffffffe;
+          regs[Pipe.opcode.typeI.rd].d=_pc;
+          _pc = res3.d;
           break;
 
         case 0b1100011:         // BEx
-    //    i=Pipe.opcode.type0.cond;
-          switch(Pipe.opcode.typeA.funct3) {
-            case 0b000:      // BEQ (Z set)  (equal)
-              if(_csr.Zero)
-                goto cond_ok;
+          switch(Pipe.opcode.typeB.funct3) {
+            case 0b000:      // BEQ (equal)
+              if(Pipe.opcode.typeB.rs1==Pipe.opcode.typeB.rs2) {
+                res3.d=((Pipe.opcode.typeB.imm1 << 1) | 
+                  (Pipe.opcode.typeB.imm2 << 5) | 
+                  (Pipe.opcode.typeB.imm3 << 11) | 
+                  (Pipe.opcode.typeB.imm4 << 12));
+                _pc+=(signed int)res3.d;
+                }
               break;
-            case 0b001:      // BNE (Z clear)  (not equal)
-              if(!_csr.Zero)
-                goto cond_ok;
+            case 0b001:      // BNE (not equal)
+              if(Pipe.opcode.typeB.rs1!=Pipe.opcode.typeB.rs2) {
+                res3.d=((Pipe.opcode.typeB.imm1 << 1) | 
+                  (Pipe.opcode.typeB.imm2 << 5) | 
+                  (Pipe.opcode.typeB.imm3 << 11) | 
+                  (Pipe.opcode.typeB.imm4 << 12));
+                _pc+=(signed int)res3.d;
+                }
               break;
-            case 0b100:      // BLT HS/CS (C set)  (unsigned higher o same)
-              if(_csr.Carry)
-                goto cond_ok;
+            case 0b100:      // BLT (unsigned higher o same)
+              if((signed int)Pipe.opcode.typeB.rs1<(signed int)Pipe.opcode.typeB.rs2) {
+                res3.d=((Pipe.opcode.typeB.imm1 << 1) | 
+                  (Pipe.opcode.typeB.imm2 << 5) | 
+                  (Pipe.opcode.typeB.imm3 << 11) | 
+                  (Pipe.opcode.typeB.imm4 << 12));
+                _pc+=(signed int)res3.d;
+                }
               break;
-            case 0b101:      // BGE LO/CC (C clear) (unsigned lower)
-              if(!_csr.Carry)
-                goto cond_ok;
+            case 0b101:      // BGE (unsigned lower)
+              if((signed int)Pipe.opcode.typeB.rs1>=(signed int)Pipe.opcode.typeB.rs2) {
+                res3.d=((Pipe.opcode.typeB.imm1 << 1) | 
+                  (Pipe.opcode.typeB.imm2 << 5) | 
+                  (Pipe.opcode.typeB.imm3 << 11) | 
+                  (Pipe.opcode.typeB.imm4 << 12));
+                _pc+=(signed int)res3.d;
+                }
               break;
-            case 0b110:      // BLTU  MI (N set) (negative)
-              if(_csr.Negative)
-                goto cond_ok;
+            case 0b110:      // BLTU (negative)
+              if(Pipe.opcode.typeB.rs1<Pipe.opcode.typeB.rs2) {
+                res3.d=((Pipe.opcode.typeB.imm1 << 1) | 
+                  (Pipe.opcode.typeB.imm2 << 5) | 
+                  (Pipe.opcode.typeB.imm3 << 11) | 
+                  (Pipe.opcode.typeB.imm4 << 12));
+                _pc+=(signed int)res3.d;
+                }
               break;
-            case 0b111:      // BGEU  PL (N clear) (positive o zero)
-              if(!_csr.Negative)
-                goto cond_ok;
+            case 0b111:      // BGEU (positive o zero)
+              if(Pipe.opcode.typeB.rs1>=Pipe.opcode.typeB.rs2) {
+                res3.d=((Pipe.opcode.typeB.imm1 << 1) | 
+                  (Pipe.opcode.typeB.imm2 << 5) | 
+                  (Pipe.opcode.typeB.imm3 << 11) | 
+                  (Pipe.opcode.typeB.imm4 << 12));
+                _pc+=(signed int)res3.d;
+                }
               break;
             }
           break;
 
         case 0b0000011:         // LB LH LW LBU LHU
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeI.funct3) {
             case 0b000:     // LB
+              res3.b.l=GetValue(regs[Pipe.opcode.typeI.rs1].d + (signed int)Pipe.opcode.typeI.imm);
+              regs[Pipe.opcode.typeI.rd].d=(signed int)res3.b.l;
               break;
             case 0b001:     // LH
+              res3.x.l=GetValue16(regs[Pipe.opcode.typeI.rs1].d + (signed int)Pipe.opcode.typeI.imm);
+              regs[Pipe.opcode.typeI.rd].d=(signed int)res3.x.l;
               break;
             case 0b010:     // LW
+              res3.d=GetValue32(regs[Pipe.opcode.typeI.rs1].d + (signed int)Pipe.opcode.typeI.imm);
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b100:     // LBU
+              res3.b.l=GetValue(regs[Pipe.opcode.typeI.rs1].d + (signed int)Pipe.opcode.typeI.imm);
+              regs[Pipe.opcode.typeI.rd].d=res3.b.l;
               break;
             case 0b101:     // LHU
+              res3.x.l=GetValue16(regs[Pipe.opcode.typeI.rs1].d + (signed int)Pipe.opcode.typeI.imm);
+              regs[Pipe.opcode.typeI.rd].d=res3.x.l;
               break;
 #ifdef RISCV_64
             case 0b110:     // LWU
@@ -605,113 +536,88 @@ int Emulate(int mode) {
               break;
 #endif
             }
-          if(Pipe.opcode.type0.optype & 1) {
-            i=Pipe.opcode.type3.shiftAmount;
-            switch(Pipe.opcode.type3.shift) {
-              case 0b00:
-                while(i--) {
-                  _csr2.Carry=res2.d & 0x80000000 ? 1 : 0;
-                  res2.d <<= 1;
-                  }
-                break;
-              case 0b01:
-                while(i--) {
-                  _csr2.Carry=res2.d & 1;
-                  res2.d >>= 1;
-                  }
-                break;
-              case 0b10:
-                while(i--) {
-                  _csr2.Carry=res2.d & 1;
-                  res2.d = ((signed long)res2.d) >> 1;
-                  }
-                break;
-              case 0b11:
-                if(!i) {    // VERIFICARE caso 0 e altro
-                  _csr2.Carry=_csr.Carry;   // il carry vero o solo se S ??
-                  j=res2.d & 1;
-                  res2.d >>= 1;
-                  res2.d |= _csr2.Carry ? 0x80000000 : 0;
-                  _csr.Carry=j;
-                  }
-                else {
-                  _csr2.Carry=_csr.Carry;   // il carry vero o solo se S ??
-                  while(i--) {
-                    j=res2.d & 1;
-                    res2.d >>= 1;
-                    res2.d |= _csr2.Carry ? 0x80000000 : 0;
-                    _csr2.Carry=j;
-                    }
-                  }
-                break;
-              }
-            }
-          else {
-            res2.d=Pipe.opcode.type2.imm;
-            }
-          
-          if(Pipe.opcode.type2.P) {
-            if(Pipe.opcode.type2.UpDown)
-              n= regs[Pipe.opcode.type2.Rn].d + res2.d;
-            else
-              n= regs[Pipe.opcode.type2.Rn].d - res2.d;
-            }
-          if(!Pipe.opcode.type2.P) {
-            if(Pipe.opcode.type2.UpDown)
-              n= regs[Pipe.opcode.type2.Rn].d + res2.d;
-            else
-              n= regs[Pipe.opcode.type2.Rn].d - res2.d;
-            }
-          if(Pipe.opcode.type2.L) {
-            if(Pipe.opcode.type2.B)
-              res3.d=GetValue(n);
-            else
-              res3.d=GetValue32(n);
-            regs[Pipe.opcode.type0.Rd].d=res3.d;
-            }
-          else {
-            if(Pipe.opcode.type2.B)
-              PutValue(n,regs[Pipe.opcode.type0.Rd].b.l);
-            else
-              PutValue32(n,regs[Pipe.opcode.type0.Rd].d);
-            res3.d=regs[Pipe.opcode.type0.Rd].d;
-            }
-          if(Pipe.opcode.type2.W)
-            regs[Pipe.opcode.type2.Rn].d = n;
           break;
           
         case 0b0100011:         // SB SH SW
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeS.funct3) {
             case 0b000:     // SB
+              res3.b.l=regs[Pipe.opcode.typeS.rs2].b.l;
+              PutValue(regs[Pipe.opcode.typeS.rs1].d + 
+                      (signed int)(Pipe.opcode.typeS.imm1 |
+                      (Pipe.opcode.typeS.imm1 << 5)),res3.b.l);
               break;
             case 0b001:     // SH
+              res3.x.l=regs[Pipe.opcode.typeS.rs2].x.l;
+              PutValue16(regs[Pipe.opcode.typeS.rs1].d + 
+                      (signed int)(Pipe.opcode.typeS.imm1 |
+                      (Pipe.opcode.typeS.imm1 << 5)),res3.x.l);
               break;
             case 0b010:     // SW
+              res3.d=regs[Pipe.opcode.typeS.rs2].d;
+              PutValue(regs[Pipe.opcode.typeS.rs1].d + 
+                      (signed int)(Pipe.opcode.typeS.imm1 |
+                      (Pipe.opcode.typeS.imm1 << 5)),res3.d);
               break;
             }
           break;
           
         case 0b0010011:         // ADDI SLTI SLTIU XORI ORI ANDI, SLLI SRLI SRAI
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeI.funct3) {
             case 0b000:     // ADDI
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=(signed int)Pipe.opcode.typeI.imm;
+              res3.d=res1.d + res2.d;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b010:     // SLTI
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=(signed int)Pipe.opcode.typeI.imm;
+              res3.d=res1.d - res2.d ? 1 : 0;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b011:     // SLTIU
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=Pipe.opcode.typeI.imm;
+              res3.d=res1.d - res2.d ? 1 : 0;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b100:     // XORI
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=(signed int)Pipe.opcode.typeI.imm;
+              res3.d=res1.d ^ res2.d;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b110:     // ORI
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=(signed int)Pipe.opcode.typeI.imm;
+              res3.d=res1.d | res2.d;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b111:     // ANDI
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=(signed int)Pipe.opcode.typeI.imm;
+              res3.d=res1.d & res2.d;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
               
             case 0b001:     // SLLI
+              res1.d=regs[Pipe.opcode.typeI.rs1].d;
+              res2.d=Pipe.opcode.typeI.imm & 0b11111;   // ovvero Pipe.opcode.typeR.rs2...
+              res3.d=res1.d << res2.d;
+              regs[Pipe.opcode.typeI.rd].d=res3.d;
               break;
             case 0b101:     // SRLI SRAI
-              if(!Pipe.opcode.typeA.funct7) { // SRLI
+              if(!Pipe.opcode.typeR.funct7 /* & 0b0100000 */) { // SRLI
+                res1.d=regs[Pipe.opcode.typeI.rs1].d;
+                res2.d=Pipe.opcode.typeI.imm & 0b11111;
+                res3.d=res1.d >> res2.d;
+                regs[Pipe.opcode.typeI.rd].d=res3.d;
                 }
               else {        // SRAI
+                res1.d=regs[Pipe.opcode.typeI.rs1].d;
+                res2.d=Pipe.opcode.typeI.imm & 0b11111;
+                res3.d=(signed int)res1.d >> res2.d;
+                regs[Pipe.opcode.typeI.rd].d=res3.d;
                 }
               break;
 #ifdef RISCV_64   // bah ci son già nel 32...
@@ -720,44 +626,84 @@ int Emulate(int mode) {
           break;
           
         case 0b0110011:         // ADD SUB SLL SLT SLTU XOR SRL SRA OR AND 
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeR.funct3) {
             case 0b000:     // ADD SUB
-              if(!Pipe.opcode.typeA.funct7) {  // ADD
+              if(!Pipe.opcode.typeR.funct7) {  // ADD
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=res1.d + res2.d;
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
                 }
               else {        // SUB
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=res1.d - res2.d;
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
                 }
 #ifdef RISCV_32M
 #endif
               break;
             case 0b001:     // SLL
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=res1.d << (res2.d & 0b11111);
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
 #ifdef RISCV_32M
 #endif
               break;
             case 0b010:     // SLT
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=(signed int)res1.d < (signed int)res2.d ? 1 : 0;
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
 #ifdef RISCV_32M
 #endif
               break;
             case 0b011:     // SLTU
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=res1.d < res2.d ? 1 : 0;
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
 #ifdef RISCV_32M
 #endif
               break;
             case 0b100:     // XOR
+              res1.d=regs[Pipe.opcode.typeR.rs1].d;
+              res2.d=regs[Pipe.opcode.typeR.rs2].d;
+              res3.d=res1.d ^ res2.d;
+              regs[Pipe.opcode.typeR.rd].d=res3.d;
 #ifdef RISCV_32M
 #endif
               break;
-            case 0b101:     // SRL SRLA
-              if(!Pipe.opcode.typeA.funct7) {  // SRL
+            case 0b101:     // SRL SRA
+              if(!Pipe.opcode.typeR.funct7) {  // SRL
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=res1.d >> (res2.d & 0b11111);
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
                 }
               else {        // SRA
+                res1.d=regs[Pipe.opcode.typeR.rs1].d;
+                res2.d=regs[Pipe.opcode.typeR.rs2].d;
+                res3.d=(signed int)res1.d >> (res2.d & 0b11111);
+                regs[Pipe.opcode.typeR.rd].d=res3.d;
                 }
 #ifdef RISCV_32M
 #endif
               break;
             case 0b110:     // OR
+              res1.d=regs[Pipe.opcode.typeR.rs1].d;
+              res2.d=regs[Pipe.opcode.typeR.rs2].d;
+              res3.d=res1.d | res2.d;
+              regs[Pipe.opcode.typeR.rd].d=res3.d;
 #ifdef RISCV_32M
 #endif
               break;
             case 0b111:     // AND
+              res1.d=regs[Pipe.opcode.typeR.rs1].d;
+              res2.d=regs[Pipe.opcode.typeR.rs2].d;
+              res3.d=res1.d & res2.d;
+              regs[Pipe.opcode.typeR.rd].d=res3.d;
 #ifdef RISCV_32M
 #endif
               break;
@@ -766,36 +712,72 @@ int Emulate(int mode) {
           
 #ifdef RISCV_64 
         case 0b0011011:         // ADDIW SLLIW SRLIW SRAIW 
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeI.funct3) {
             case 0b000:     // ADDIW
+              res1.d32.l=regs[Pipe.opcode.typeI.rs1].d32.l;
+              res2.d32.l=Pipe.opcode.typeI.imm;
+              res3.d32.l=res1.d32.l + res2.d32.l;
+              regs[Pipe.opcode.typeI.rd].d32.l=(signed int)res3.d32.l;
               break;
             case 0b001:     // SLLIW
+              res1.d32.l=regs[Pipe.opcode.typeI.rs1].d32.l;
+              res2.d32.l=Pipe.opcode.typeI.imm;
+              res3.d32.l=res1.d32.l << (res2.d32.l & 0b11111);
+              regs[Pipe.opcode.typeA.rd].d32.l=res3.d32.l;
               break;
             case 0b101:     // SRLIW SRAIW
-              if(!Pipe.opcode.typeA.funct7) { // SRLIW
+              if(!Pipe.opcode.typeR.funct7) { // SRLIW
+                res1.d32.l=regs[Pipe.opcode.typeI.rs1].d32.l;
+                res2.d32.l=Pipe.opcode.typeI.imm;
+                res3.d32.l=res1.d32.l >> (res2.d32.l & 0b11111);
+                regs[Pipe.opcode.typeI.rd].d32.l=res3.d32.l;
                 }
               else {        // SRAIW
+                res1.d32.l=regs[Pipe.opcode.typeI.rs1].d32.l;
+                res2.d32.l=Pipe.opcode.typeI.imm;
+                res3.d32.l=(signed int)res1.d32.l >> (res2.d32.l & 0b11111);
+                regs[Pipe.opcode.typeI.rd].d32.l=res3.d32.l;
                 }
               break;
             }
           break;
           
         case 0b0111011:         // ADDW SUBW SLLW SRLW SRAW
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeI.funct3) {
             case 0b000:     // ADDW SUBW
-              if(!Pipe.opcode.typeA.funct7) { // ADDW
+              if(!Pipe.opcode.typeR.funct7) { // ADDW
+                res1.d32.l=regs[Pipe.opcode.typeR.rs1].d32.l;
+                res2.d32.l=regs[Pipe.opcode.typeR.rs2].d32.l;
+                res3.d32.l=res1.d32.l + res2.d32.l;
+                regs[Pipe.opcode.typeR.rd].d32.l=res3.d32.l;
                 }
               else {        // SUBW
+                res1.d32.l=regs[Pipe.opcode.typeR.rs1].d32.l;
+                res2.d32.l=regs[Pipe.opcode.typeR.rs2].d32.l;
+                res3.d32.l=res1.d32.l - res2.d32.l;
+                regs[Pipe.opcode.typeR.rd].d32.l=res3.d32.l;
                 }
 #ifdef RISCV_64M
 #endif
               break;
             case 0b001:     // SLLW
+              res1.d32.l=regs[Pipe.opcode.typeR.rs1].d32.l;
+              res2.d32.l=regs[Pipe.opcode.typeR.rs2].d32.l;
+              res3.d32.l=res1.d32.l << (res2.d32.l & 0b11111);
+              regs[Pipe.opcode.typeR.rd].d32.l=res3.d32.l;
               break;
             case 0b101:     // SRLW SRAW
-              if(!Pipe.opcode.typeA.funct7) { // SRLW
+              if(!Pipe.opcode.typeR.funct7) { // SRLW
+                res1.d32.l=regs[Pipe.opcode.typeR.rs1].d32.l;
+                res2.d32.l=regs[Pipe.opcode.typeR.rs2].d32.l;
+                res3.d32.l=res1.d32.l << (res2.d32.l & 0b11111);
+                regs[Pipe.opcode.typeR.rd].d32.l=res3.d32.l;
                 }
               else {        // SRAW
+                res1.d32.l=regs[Pipe.opcode.typeI.rs1].d32.l;
+                res2.d32.l=Pipe.opcode.typeA.imm;
+                res3.d32.l=(signed int)res1.d32.l >> (res2.d32.l & 0b11111);
+                regs[Pipe.opcode.typeA.rd].d32.l=res3.d32.l;
                 }
               break;
 #ifdef RISCV_64M
@@ -814,417 +796,11 @@ int Emulate(int mode) {
           break;
 #endif
           
-        case 0:         // data processing, PSR transfer (anche halfword, v4); branch exchange (v4)
-          if(Pipe.opcode.type0b.u2 == 0b1001) {   // caso speciale MULtiply
-            if(Pipe.opcode.type0b.u3 == 0b000) {   // 32
-              if(Pipe.opcode.type0b.A) {
-                res1.d=regs[Pipe.opcode.type0b.Rm].d;
-                res2.d=regs[Pipe.opcode.type0b.Rs].d;
-                res3.d = res1.d*res2.d;
-                res2.d=regs[Pipe.opcode.type0b.Rn].d;
-                res3.d = res3.d+res2.d;
-                }
-              else {
-                res1.d=regs[Pipe.opcode.type0b.Rm].d;
-                res2.d=regs[Pipe.opcode.type0b.Rs].d;
-                res3.d = res1.d*res2.d;
-                }
-              if(Pipe.opcode.type0b.S)
-                goto AggFlagZ;
-              else
-                goto noAggFlag;
-              }
-#ifdef ARM_V4   // pure V3, dice
-            else if(Pipe.opcode.type0b.u3 == 0b010) {   // 64 unsigned
-              unsigned long long ll;
-              if(Pipe.opcode.type0b.A) {
-                unsigned long long ll2;
-                ll2=regs[Pipe.opcode.type0b.Rd].d;
-                ll2 <<= 32;
-                ll2 |= regs[Pipe.opcode.type0b.Rn].d;
-                ll = (unsigned long long)regs[Pipe.opcode.type0b.Rm].d * (unsigned long long)regs[Pipe.opcode.type0b.Rs].d;
-                ll += ll2;
-                regs[Pipe.opcode.type0b.Rd].d = ll >> 32;
-                regs[Pipe.opcode.type0b.Rn].d = ll & 0xffffffff;
-                }
-              else {
-                ll = (unsigned long long)regs[Pipe.opcode.type0b.Rm].d * (unsigned long long)regs[Pipe.opcode.type0b.Rs].d;
-                regs[Pipe.opcode.type0b.Rd].d = ll >> 32;
-                regs[Pipe.opcode.type0b.Rn].d = ll & 0xffffffff;
-                }
-              }
-            else if(Pipe.opcode.type0b.u3 == 0b011) {   // 64 signed
-              unsigned long long ll;
-              if(Pipe.opcode.type0b.A) {
-                unsigned long long ll2;   // signed o no??
-                ll2=regs[Pipe.opcode.type0b.Rd].d;
-                ll2 <<= 32;
-                ll2 |= regs[Pipe.opcode.type0b.Rn].d;
-                ll = (signed long long)regs[Pipe.opcode.type0b.Rm].d * (signed long long)regs[Pipe.opcode.type0b.Rs].d;
-                ll += ll2;
-                regs[Pipe.opcode.type0b.Rd].d = ll >> 32;
-                regs[Pipe.opcode.type0b.Rn].d = ll & 0xffffffff;
-                }
-              else {
-                ll = (signed long long)regs[Pipe.opcode.type0b.Rm].d * (signed long long)regs[Pipe.opcode.type0b.Rs].d;
-                regs[Pipe.opcode.type0b.Rd].d = ll >> 32;
-                regs[Pipe.opcode.type0b.Rn].d = ll & 0xffffffff;
-                }
-              }
-#endif
-            if(Pipe.opcode.type0b.S)
-              goto AggFlagZ;
-            else
-              goto noAggFlag;
-            }   // multiply
-          
-#ifdef ARM_V4
-          else if(Pipe.opcode.type0c.u2 == 1 && Pipe.opcode.type0c.u3 == 1 && Pipe.opcode.type0c.u4 == 0b0000) {   // 
-            if(Pipe.opcode.type0c.u5 == 1) {   // 
-              res2.d=Pipe.opcode.type0d.ofsL | (Pipe.opcode.type0d.ofsH << 4);
-              }
-            else {
-              res2.d=regs[Pipe.opcode.type0c.Rm].d;
-              }
-            if(Pipe.opcode.type0c.P) {
-              if(Pipe.opcode.type0c.UpDown)
-                n= regs[Pipe.opcode.type0c.Rn].d + res2.d;
-              else
-                n= regs[Pipe.opcode.type0c.Rn].d - res2.d;
-              }
-            if(!Pipe.opcode.type0c.P) {
-              if(Pipe.opcode.type0c.UpDown)
-                n= regs[Pipe.opcode.type0c.Rn].d + res2.d;
-              else
-                n= regs[Pipe.opcode.type0c.Rn].d - res2.d;
-              }
-            if(Pipe.opcode.type0c.L) {
-              switch(Pipe.opcode.type0c.SH) {
-                case 0:   // quasi-swp ma non ammesso
-                  break;
-                case 2:
-                  res3.d=(signed long)GetValue(n);
-                  break;
-                case 1:
-                  res3.d=GetValue16(n);
-                  break;
-                case 3:
-                  res3.d=(signed long)GetValue16(n);
-                  break;
-                regs[Pipe.opcode.type0.Rd].d=res3.d;
-                }
-              }
-            else {
-              switch(Pipe.opcode.type0c.SH) {
-                case 0:   // swp
-//          else if(Pipe.opcode.type0e.u2 == 0b1001 && Pipe.opcode.type0e.u3 == 0b0000 && Pipe.opcode.type0e.u4 == 0b00 && Pipe.opcode.type0e.u5 == 0b10) {   // swp
-                  if(Pipe.opcode.type0e.u5 == 0b10 && Pipe.opcode.type0e.u4 == 0b00) {   // dovrebbero essere SOLO così per SWP
-              // c'è qualche dubbio su come si usano i 3 registri...
-                    if(Pipe.opcode.type0e.B) {
-                      res3.b.l=GetValue(regs[Pipe.opcode.type0e.Rn].d);
-                      PutValue(regs[Pipe.opcode.type0e.Rn].d,regs[Pipe.opcode.type0e.Rm].b.l);
-                      regs[Pipe.opcode.type0e.Rd].b.l=res3.b.l;
-                      }
-                    else {
-                      res3.d=GetValue32(n);
-                      PutValue32(regs[Pipe.opcode.type0e.Rn].d,regs[Pipe.opcode.type0e.Rm].d);
-                      regs[Pipe.opcode.type0e.Rd].d=res3.d;
-                      }
-                    }
-                  break;
-                case 2:   // dice che "non dovrebbe accadere" signed store! 
-                  PutValue(n,regs[Pipe.opcode.type0.Rd].b.l);
-                  break;
-                case 1:
-                  PutValue16(n,regs[Pipe.opcode.type0.Rd].d);
-                  break;
-                case 3:
-                  PutValue16(n,regs[Pipe.opcode.type0.Rd].d);
-                  break;
-                regs[Pipe.opcode.type0.Rd].d=res3.d;
-                }
-              res3.d=regs[Pipe.opcode.type0.Rd].d;
-              }
-            if(Pipe.opcode.type0c.W)
-              regs[Pipe.opcode.type0c.Rn].d = n;
-
-            goto noAggFlag;
-            }
-          else if((Pipe.d & 0x0fffffff0) == 0b00000001001011111111111100010000) {   // bah
-            _pc = regs[Pipe.opcode.type0.Rn].d;
-            _csr.Thumb=Pipe.opcode.type0.Rn & 1;
-            }
-#else
-          else if(Pipe.opcode.type0e.u2 == 0b1001 && Pipe.opcode.type0e.u3 == 0b0000 && Pipe.opcode.type0e.u5 == 0b10 && Pipe.opcode.type0e.u4 == 0b00) {   // SWP
-            // c'è qualche dubbio su come si usano i 3 registri...
-            if(Pipe.opcode.type0e.B) {
-              res3.b.l=GetValue(regs[Pipe.opcode.type0e.Rn].d);
-              PutValue(regs[Pipe.opcode.type0e.Rn].d,regs[Pipe.opcode.type0e.Rm].b.l);
-              regs[Pipe.opcode.type0e.Rd].b.l=res3.b.l;
-              }
-            else {
-              res3.d=GetValue32(n);
-              PutValue32(regs[Pipe.opcode.type0e.Rn].d,regs[Pipe.opcode.type0e.Rm].d);
-              regs[Pipe.opcode.type0e.Rd].d=res3.d;
-              }
-
-            goto noAggFlag;
-            }
-#endif
-          
-        case 1:         // data processing, PSR transfer 
-          res1.d=regs[Pipe.opcode.type0.Rn].d;
-          if(Pipe.opcode.type0.optype & 1) {
-            res2.d=Pipe.opcode.type1.imm;
-            while(Pipe.opcode.type1.rotate--) {
-              i=res2.d & 3;     // non serve, direi
-              res2.d >>= 2;
-              res2.d |= i << 30;
-              }
-            }
-          else {
-            res2.d=regs[Pipe.opcode.type0.Rm].d;
-            if(Pipe.opcode.type0.shiftType)
-              i=regs[Pipe.opcode.type0a.Rs].b.l;
-            else
-              i=Pipe.opcode.type0.shiftAmount;
-            switch(Pipe.opcode.type0.shift) {
-              case 0b00:
-                while(i--) {
-                  _csr2.Carry=res2.d & 0x80000000 ? 1 : 0;
-                  res2.d <<= 1;
-                  }
-                break;
-              case 0b01:
-                while(i--) {
-                  _csr2.Carry=res2.d & 1;
-                  res2.d >>= 1;
-                  }
-                break;
-              case 0b10:
-                while(i--) {
-                  _csr2.Carry=res2.d & 1;
-                  res2.d = ((signed long)res2.d) >> 1;
-                  }
-                break;
-              case 0b11:
-                if(!i) {    // VERIFICARE caso 0 e altro
-                  _csr2.Carry=_csr.Carry;   // il carry vero o solo se S ??
-                  j=res2.d & 1;
-                  res2.d >>= 1;
-                  res2.d |= _csr2.Carry ? 0x80000000 : 0;
-                  _csr.Carry=j;
-                  }
-                else {
-                  _csr2.Carry=_csr.Carry;   // il carry vero o solo se S ??
-                  while(i--) {
-                    j=res2.d & 1;
-                    res2.d >>= 1;
-                    res2.d |= _csr2.Carry ? 0x80000000 : 0;
-                    _csr2.Carry=j;
-                    }
-                  }
-                break;
-              }
-            }
-          switch(Pipe.opcode.type0.opcode) {
-            unsigned long long ll;
-            case 0b0000:    // AND
-              res3.d=res1.d & res2.d;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              break;
-            case 0b0001:    // EOR
-              res3.d=res1.d ^ res2.d;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              break;
-            case 0b0010:    // SUB
-              ll=(signed long long)res1.d - res2.d;
-              res3.d=ll;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              _csr2.Carry=ll & 0xffffffff00000000 ? 1 : 0;
-              break;
-            case 0b0011:    // RSB
-              ll=(signed long long)res2.d - res1.d;
-              res3.d=ll;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              _csr2.Carry=ll & 0xffffffff00000000 ? 1 : 0;
-              break;
-            case 0b0100:    // ADD
-              ll=(signed long long)res1.d + res2.d;
-              res3.d=ll;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              _csr2.Carry=ll & 0xffffffff00000000 ? 1 : 0;
-              break;
-            case 0b0101:    // ADDC
-              ll=(signed long long)res1.d + res2.d + _csr.Carry;
-              res3.d=ll;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              _csr2.Carry=ll & 0xffffffff00000000 ? 1 : 0;
-              break;
-            case 0b0110:    // SBC
-              ll=(signed long long)res1.d - res2.d + _csr.Carry - 1;
-              res3.d=ll;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              _csr2.Carry=ll & 0xffffffff00000000 ? 1 : 0;
-              break;
-            case 0b0111:    // RSC
-              ll=(signed long long)res2.d - res1.d + _csr.Carry - 1;
-              res3.d=ll;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              _csr2.Carry=ll & 0xffffffff00000000 ? 1 : 0;
-              break;
-            case 0b1000:    // TST
-#ifdef ARM_V4
-              if(Pipe.opcode.type0b.S)
-                res3.d=res1.d & res2.d;
-              else {
-                if(Pipe.opcode.type2.imm==0b000000000000 && Pipe.opcode.type0b.Rd==0b1111) {    // MSR
-                  regs[Pipe.opcode.type2.Rd].d=_csr.d;
-                  }
-                }
-#else
-              // https://github.com/NationalSecurityAgency/ghidra/issues/654
-              res3.d=res1.d & res2.d;
-              if(Pipe.opcode.type0.Rd == 15)
-                goto upd_csr_26;
-#endif
-              break;
-            case 0b1001:    // TEQ
-#ifdef ARM_V4
-              if(Pipe.opcode.type0b.S)
-                res3.d=res1.d ^ res2.d;
-              else {
-                if(Pipe.opcode.type0e.Rd==0b1111 && Pipe.opcode.type0e.u2==0b0000 && Pipe.opcode.type0e.u3==0b0000) {    // MSR
-                  if(Pipe.opcode.type0e.Rn==0b1001) 
-                    _csr.d=regs[Pipe.opcode.type0.Rm].d;
-                  else if(Pipe.opcode.type0e.Rn==0b1000) {
-                    if(Pipe.opcode.type0.optype & 1)
-                      _csr.d=regs[Pipe.opcode.type0.Rm].d;
-                    else
-                      _csr.d=res2.d;
-                    }
-                  }
-                }
-#else
-              res3.d=res1.d ^ res2.d;
-              if(Pipe.opcode.type0.Rd == 15)
-                goto upd_csr_26;
-#endif
-              break;
-            case 0b1010:    // CMP
-#ifdef ARM_V4
-              if(Pipe.opcode.type0b.S)
-                res3.d=res1.d - res2.d;
-              else {
-                if(Pipe.opcode.type2.imm==0b000000000000 && Pipe.opcode.type0b.Rd==0b1111) {    // MSR
-                  regs[Pipe.opcode.type2.Rd].d=_spsr[_csr_mode].d;
-                  }
-                }
-#else
-              res3.d=res1.d - res2.d;
-              if(Pipe.opcode.type0.Rd == 15)
-                goto upd_csr_26;
-#endif
-              break;
-            case 0b1011:    // CMN
-#ifdef ARM_V4
-              if(Pipe.opcode.type0b.S)
-                res3.d=res1.d + res2.d;
-              else {
-                if(Pipe.opcode.type0e.Rd==0b1111 && Pipe.opcode.type0e.u2==0b0000 && Pipe.opcode.type0e.u3==0b0000) {    // MSR
-                  if(Pipe.opcode.type0e.Rn==0b1001) 
-                    _spsr[_csr_mode].d=regs[Pipe.opcode.type0.Rm].d;
-                  else if(Pipe.opcode.type0e.Rn==0b1000) {
-                    if(Pipe.opcode.type0.optype & 1)
-                      _spsr[_csr_mode].d=regs[Pipe.opcode.type0.Rm].d;
-                    else
-                      _spsr[_csr_mode].d=res2.d;
-                    }
-                  }
-                }
-#else
-              res3.d=res1.d + res2.d;
-              if(Pipe.opcode.type0.Rd == 15) {
-upd_csr_26:
-                if(_csr_mode==MODE_USER)
-                  _csr.b = (_csr.b & 0x0f) | (res3.b.u & 0b11110000);
-                else {
-                  _csr.b = res3.b.u & 0b11111100;
-                  _csr_mode = res3.b.l & 0b00000011;
-                  }
-                }
-#endif
-              break;
-            case 0b1100:    // ORR
-              res3.d=res1.d | res2.d;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              break;
-            case 0b1101:    // MOV
-              res3.d=res2.d;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              break;
-            case 0b1110:    // BIC
-              res3.d=res1.d & ~res2.d;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              break;
-            case 0b1111:    // MVN
-              res3.d=~res2.d;
-              regs[Pipe.opcode.type0.Rd].d=res3.d;
-              break;
-            }
-          if(Pipe.opcode.type0b.S)
-            goto AggFlag;
-          break;
-          
-        case 4:         // load/store multiple reg
-          n=regs[Pipe.opcode.type4.Rn].d;
-          if(Pipe.opcode.type4.UpDown) {
-            // Lowest register number is always transferred to/from lowest memory location accessed.
-            for(i=0,j=1; i<16; i++,j<<=1) {
-              if(Pipe.opcode.type4.Rlist & j) {
-                if(Pipe.opcode.type4.P)
-                  n+=4;
-                if(Pipe.opcode.type4.L)
-                  regs[i].d=GetValue32(n);
-                else
-                  PutValue32(n,regs[i].d);
-                if(!Pipe.opcode.type4.P)
-                  n+=4;
-                }
-              }
-            }
-          else {
-            for(i=15,j=0x8000; i>=0; i--,j>>=1) {
-              if(Pipe.opcode.type4.Rlist & j) {
-                if(Pipe.opcode.type4.P)
-                  n-=4;
-                if(Pipe.opcode.type4.L)
-                  regs[i].d=GetValue32(n);
-                else
-                  PutValue32(n,regs[i].d);
-                if(!Pipe.opcode.type4.P)
-                  n-=4;
-                }
-              }
-            }
-          if(Pipe.opcode.type4.W)
-            regs[Pipe.opcode.type4.Rn].d = n;
-          if(Pipe.opcode.type4.S) {   // qua indica Force PSR ecc!
-            if(Pipe.opcode.type4.Rlist & 0x8000) {
-              if(Pipe.opcode.type4.L)
-                _csr=_spsr[_csr_mode & 0xf /*diciamo*/];
-              else ;
-              // ALTRIMENTI significa che doveva prendere i registri da User bank e non da quello privileged (se siamo != user)
-              }
-            else ; // idem...
-            }
-          break;
-          
         case 0b0001111:     // FENCE
           break;
           
         case 0b1110011:     // ECALL, EBREAK, CSRx
-          switch(Pipe.opcode.typeA.funct3) {
+          switch(Pipe.opcode.typeI.funct3) {
             case 0b000:     // EBREAK
               if(!Pipe.opcode.typeI.imm) {    // ECALL
                 }
@@ -1250,116 +826,17 @@ upd_csr_26:
           break;
           
         case 7:         // Coprocessor data operation, register transfer o software interrupt
-          if(Pipe.opcode.type7.u3) {    // SWI
-            DoSWI=1;
-            // FINIRE!
-            }
-          else {
-            }
           break;
         }
 noAggFlag:
       continue;
       
 AggFlag:
-          /*When Rd is R15 and the S flag is set the result of the operation is placed in R15 and
-the SPSR corresponding to the current mode is moved to the CSR. This allows state
-changes which atomically restore both PC and CSR. This form of instruction should
-not be used in User mode.*/
-      if(Pipe.opcode.type0.Rd == 15) {    // verificare che Rd sia valido; 
-        switch(_csr_mode) {
-          case MODE_IRQ:
-            for(i=13; i<15; i++)    /// VERIFICARE!
-              regs[i]=regs_IRQ[i-8];
-            break;
-          case MODE_FIQ:
-            for(i=8; i<15; i++)
-              regs[i]=regs_FIQ[i-8];
-            break;
-          case MODE_SVC:
-            for(i=13; i<15; i++)
-              regs[i]=regs_Svc[i-8];
-            break;
-          }
-#ifdef ARM_V4
-        _csr=_spsr[_csr_mode & 0xf /*diciamo*/];
-#else
-        _csr=_spsr[_csr_mode];
-#endif
-        }
-      else {
-        _csr.Negative=res3.d & 0x80000000 ? 1 : 0;
-        _csr.Overflow= ((res1.d & 0x40000000) + (res2.d & 0x40000000)) != ((res1.d & 0x80000000) + (res2.d & 0x80000000));
-#warning verificare calcolo V
-AggFlagZ:
-        _csr.Carry=_csr2.Carry;
-        _csr.Zero=!res3.d;
-        }
+        ;
 
     
 		} while(!fExit);
+    
 	}
 
-
-#if 0
-main(int argc, char *argv[]) {
-	int i,j,k;
-	unsigned char _based(rom_seg) *s;
-
-	if(argc >=2) {
-		debug=1;
-		}
-	if((rom_seg=_bheapseg(0x6000)) == _NULLSEG)
-		goto fine;
-	if((p=_bmalloc(rom_seg,0x6000)) == _NULLOFF)
-		goto fine;
-	if((ram_seg=_bheapseg(0xffe8)) == _NULLSEG)
-		goto fine;
-	if((p1=_bmalloc(ram_seg,0xffe8)) == _NULLOFF)
-		goto fine;
-	_pswmemset(p,0,0x6000);
-	_pswmemset(p1,0,0xffe8);
-	stack_seg=ram_seg+10;
-/*
-		for(i=0; i< 8192; i++) {
-			printf("Indirizzo %04x, valore %02x\n",s,*s);
-			s++;
-			}
-		*/
-		close(i);
-		OldTimer=_dos_getvect(0x8);
-		OldCtrlC=_dos_getvect(0x23);
-		OldKeyb = _dos_getvect( 9 );
-		_dos_setvect(0x8,NewTimer);
-		_dos_setvect(0x23,NewCtrlC);
-		_dos_setvect( 9, NewKeyb );
-		_setvideomode(_MRES16COLOR);
-		_clearscreen(_GCLEARSCREEN);
-		_displaycursor( _GCURSOROFF );
-		Emulate();
-		_dos_setvect(0x8,OldTimer);
-		_dos_setvect(0x23,OldCtrlC);
-		_dos_setvect( 9, OldKeyb );
-		_displaycursor( _GCURSORON );
-		_setvideomode(_DEFAULTMODE);
-		}
-fine:
-	if(p1 != _NULLOFF)
-		_bfree(ram_seg,p1);
-	else
-		puts("no off");
-	if(ram_seg != _NULLSEG)
-		_bfreeseg(ram_seg);
-	else
-		puts("no seg");
-	if(p != _NULLOFF)
-		_bfree(rom_seg,p);
-	else
-		puts("no off");
-	if(rom_seg != _NULLSEG)
-		_bfreeseg(rom_seg);
-	else
-		puts("no seg");
-	}
-#endif
 

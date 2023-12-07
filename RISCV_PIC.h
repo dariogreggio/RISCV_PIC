@@ -18,8 +18,15 @@
     #define USING_SIMULATOR
 #endif
 
+#include <stdint.h>
+
 
 //#define REAL_SIZE    
+//#define RISCV_64 1
+//#define RISCV_32M 1
+//#define RISCV_64M 1
+//#define RISCV_16 1
+
 
 
 #define FCY 205000000ul    //Oscillator frequency; ricontrollato con baud rate, pare giusto così!
@@ -90,11 +97,14 @@ int decodeKBD(int, long, BOOL);
 BYTE GetValue(DWORD t);
 WORD GetValue16(DWORD t);
 DWORD GetValue32(DWORD t);
-DWORD GetPipe(DWORD t);
 void PutValue(DWORD t,BYTE t1);
 void PutValue16(DWORD t,WORD t1);
 void PutValue32(DWORD t,DWORD t1);
+#ifdef RISCV_64 
+uint64_t GetPipe(uint64_t t);
+#else
 DWORD GetPipe(DWORD t);
+#endif
 BYTE checkCond(BYTE);
 
 
