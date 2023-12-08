@@ -268,10 +268,10 @@
 #endif
 
 
-const char CopyrightString[]= {'A','R','M','/','A','c','o','r','n',' ','E','m','u','l','a','t','o','r',' ','v',
-	VERNUMH+'0','.',VERNUML/10+'0',(VERNUML % 10)+'0',' ','-',' ', '1','4','/','0','4','/','2','2', 0 };
+const char CopyrightString[]= {'R','i','s','c','- ','V',' ','E','m','u','l','a','t','o','r',' ','v',
+	VERNUMH+'0','.',VERNUML/10+'0',(VERNUML % 10)+'0',' ','-',' ', '0','8','/','1','2','/','2','3', 0 };
 
-const char Copyr1[]="(C) Dario's Automation 2020-2022 - G.Dar\xd\xa\x0";
+const char Copyr1[]="(C) Dario's Automation 2023 - G.Dar\xd\xa\x0";
 
 
 

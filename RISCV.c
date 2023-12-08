@@ -1,5 +1,5 @@
 // 6 dicembre 2023
-
+// https://msyksphinz-self.github.io/riscv-isadoc/html/rvi.html#mret
 //
 //
 
@@ -173,20 +173,30 @@ union __attribute__((__packed__)) REGISTER {
 #define ID_THUMBL 0x06000000
 #define ID_CUMULATIVE 0x08000000
 union __attribute__((__packed__)) REGISTRO_CSR {   // 
-  BYTE b;
+  DWORD d;
   struct __attribute__((__packed__)) {
-    unsigned int dummy: 2;     // enum CPU_MODES; il vero Mode è in r15<0..1>
-    unsigned int FIRQ: 1;
-    unsigned int IRQ: 1;
+    unsigned int UIE: 1;     // 
+    unsigned int WPRI: 3;
+    unsigned int UPIE: 1;
     };
   };
-union REGISTRO_CSR _csr2;
-// In the original mode, the Status Register and Program Counter were combined in a single register, as follows: https://heyrick.eu/armwiki/The_Status_register
-#ifdef ARM_V4
-union REGISTRO_CSR _spsr[5];   // gestire buchi in Modes!
-#else
-union REGISTRO_CSR _spsr[3];
-#endif
+/*0x000 ustatus User status register.
+0x004 uie User interrupt-enable register.
+0x005 utvec User trap handler base address.
+0x040 uscratch Scratch register for user trap handlers.
+0x041 uepc User exception program counter.
+0x042 ucause User trap cause.
+0x043 utval User bad address or instruction.
+0x044 uip User interrupt pending.*/
+//union REGISTRO_CSR ustatus,uie,utvec,uscratch,uepc,ucause,utval,uip;
+  // dovrebbero essercene 3 gruppi, user machine e super...
+  // in tutto 4096 :D bestie!
+union REGISTRO_CSR mstatus,mie,mtvec,mscratch,mepc,mcause,mtval,mip,
+      misa,mcounteren,menvcfg,mstatush,mscratch,mtinst,mtval2,mcycle,
+      mvendorid,marchid,mimpid,mhartid,mconfigptr;
+
+//https://five-embeddev.com/riscv-isa-manual/latest/machine.html
+//https://five-embeddev.com/quickref/interrupts.html
 
 BYTE ram_seg[RAM_SIZE];
 
@@ -194,10 +204,12 @@ BYTE ram_seg[RAM_SIZE];
 #define _sp regs[13].d
 #define _lr regs[1].d   // "di solito", dice - opp 5
 #define _x0 regs[0].d   // il "registro x0" è dummy!!
+
+uint64_t mtime,mtimecmp;    // sempre 64bit!
   
 BYTE rom_seg[ROM_SIZE];			
 BYTE Keyboard[8]={255,255,255,255,255,255,255,255};
-BYTE DoReset=1,DoIRQ=0,DoSWI=0,DoFIQ=0;
+BYTE DoReset=1,DoIRQ=0;
 BYTE ColdReset=1;
 union __attribute__((__packed__)) {
   struct __attribute__((__packed__)) RISCV_OPCODE opcode;
@@ -258,6 +270,8 @@ union __attribute__((__packed__)) RESULT {
   DWORD d;
   };
 #endif
+
+union REGISTRO_CSR *getCSR(DWORD );
 
 BYTE GetValue(DWORD t) {
 	register BYTE i;
@@ -379,6 +393,8 @@ int Emulate(int mode) {
 			UpdateScreen(1);
     	}
     
+    mcycle.d++;
+    mtime++;      // bah e questo dunque??
 
 		if(ColdReset)
 			continue;
@@ -401,9 +417,30 @@ int Emulate(int mode) {
 			}*/
 		if(DoReset) {
       _sp=0;
- 			_pc=0x00000000;
-      DoIRQ=DoFIQ=DoSWI=0;
+ 			_pc=0x00000000;   // implementation-defined, dice...
+      //https://five-embeddev.com/riscv-isa-manual/latest/machine.html#sec:reset
+      DoIRQ=0;
 			DoReset=0;
+      mstatus.d=0;
+      mie.d=0;
+      mtvec.d=0;
+      mscratch.d=0;
+      mepc.d=0;
+      mcause.d=0;
+      mtval.d=0;
+      mip.d=0;
+      }
+		if(DoIRQ) {
+//      https://stackoverflow.com/questions/61913210/risc-v-interrupt-handling-flow
+      if(mstatus.UIE) {
+        mstatus.UPIE=mstatus.UIE;
+
+        mip.d=_pc;      // boh
+
+// esempio https://stackoverflow.com/questions/57870131/risc-v-jump-to-interrupt-handler        
+        
+        mstatus.UIE=0;
+        }
 			}
 
 
@@ -801,23 +838,68 @@ int Emulate(int mode) {
           
         case 0b1110011:     // ECALL, EBREAK, CSRx
           switch(Pipe.opcode.typeI.funct3) {
+            DWORD t;
+            union REGISTRO_CSR *pcsr;
             case 0b000:     // EBREAK
-              if(!Pipe.opcode.typeI.imm) {    // ECALL
-                }
-              else {        // EBREAK
+              switch(Pipe.opcode.typeI.imm) {    // ECALL
+                case 0b000000000000:
+                  //https://stackoverflow.com/questions/64863737/risc-v-software-interrupts
+
+                  mcause;
+                  mtval;
+                  mip.d=_pc;      // boh
+
+                  break;
+                case 0b000000000001:        // EBREAK
+                
+                  mcause;
+                  mtval;
+                  mip;
+
+                  break;
+                case 0b011000000010:        // MRET
+                  mstatus.UIE=mstatus.UPIE;
+                  mstatus.UPIE=1;
+                  _pc=mip.d;
+                  break;
+                case 0b000100000101:        // WFI
+                  break;
                 }
               break;
             case 0b001:     // CSRRW
+              pcsr=getCSR(Pipe.opcode.typeI.imm);
+              t=pcsr->d;
+              pcsr->d = regs[Pipe.opcode.typeI.rs1].d;
+              regs[Pipe.opcode.typeI.rs1].d=t;
               break;
             case 0b010:     // CSRRS
+              pcsr=getCSR(Pipe.opcode.typeI.imm);
+              t=pcsr->d;
+              pcsr->d |= regs[Pipe.opcode.typeI.rs1].d;
+              regs[Pipe.opcode.typeI.rs1].d=t;
               break;
             case 0b011:     // CSRRC
+              pcsr=getCSR(Pipe.opcode.typeI.imm);
+              t=pcsr->d;
+              pcsr->d &= ~regs[Pipe.opcode.typeI.rs1].d;
+              regs[Pipe.opcode.typeI.rs1].d=t;
               break;
             case 0b101:     // CSRRWI
+              pcsr=getCSR(Pipe.opcode.typeI.imm);
+              regs[Pipe.opcode.typeI.rs1].d=pcsr->d;
+              pcsr->d = Pipe.opcode.typeI.rs1;
               break;
             case 0b110:     // CSRRSI
+              pcsr=getCSR(Pipe.opcode.typeI.imm);
+              t=pcsr->d;
+              pcsr->d = t | Pipe.opcode.typeI.rs1;
+              regs[Pipe.opcode.typeI.rs1].d=t;
               break;
             case 0b111:     // CSRRCI
+              pcsr=getCSR(Pipe.opcode.typeI.imm);
+              t=pcsr->d;
+              pcsr->d = t & ~Pipe.opcode.typeI.rs1;
+              regs[Pipe.opcode.typeI.rs1].d=t;
               break;
             }
           break;
@@ -839,4 +921,73 @@ AggFlag:
     
 	}
 
+union REGISTRO_CSR *getCSR(DWORD n) {
+  
+  switch(n) {   // per non allocarli "tutti" faccio così
+    case 0x300:
+      return &mstatus;
+      break;
+    case 0x301:
+      return &misa;
+      break;
+    case 0x304:
+      return &mie;
+      break;
+    case 0x305:
+      return &mtvec;
+      break;
+    case 0x306:
+      return &mcounteren;
+      break;
+    case 0x30a:
+      return &menvcfg;
+      break;
+    case 0x310:
+      return &mstatush;
+      break;
+    case 0x340:
+      return &mscratch;
+      break;
+    case 0x341:
+      return &mepc;
+      break;
+    case 0x342:
+      return &mcause;
+      break;
+    case 0x343:
+      return &mtval;
+      break;
+    case 0x344:
+      return &mip;
+      break;
+    case 0x34a:
+      return &mtinst;
+      break;
+    case 0x34b:
+      return &mtval2;
+      break;
+
+    case 0xb00:
+      return &mcycle;
+      break;
+
+    case 0xf11:
+      return &mvendorid;
+      break;
+    case 0xf12:
+      return &marchid;
+      break;
+    case 0xf13:
+      return &mimpid;
+      break;
+    case 0xf14:
+      return &mhartid;
+      break;
+    case 0xf15:
+      return &mconfigptr;
+      break;
+    
+    }
+  return NULL;
+  }
 
